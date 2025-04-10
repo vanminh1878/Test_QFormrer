@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoProcessor, AutoTokenizer
-from model.backbone.custom_blip2_seq2seq_lm import Custom_BLIP2_Seq2Seq_LM
+#from model.backbone.custom_blip2_seq2seq_lm import Custom_BLIP2_Seq2Seq_LM
 from model.backbone.custom_blip2_casual_lm import Custom_BLIP2_Casual_LM
 from text_module.text_encoding import Text_Encode
 from vision_module.vision_pixel_embedding import Vision_Embedding, Vision_Embedding_Extracted
@@ -31,16 +31,16 @@ class BLIP2_Captioning_Model(nn.Module):
             cast_dtype=torch.bfloat16
         else:
             cast_dtype=torch.float16
-        if 't5' in lm_name.lower() or 't0' in lm_name.lower() or 'bart' in lm_name.lower():
-            self.embedding = Custom_BLIP2_Seq2Seq_LM(vit_pretrained=vision_name,
-                                    lm_pretrained=lm_name,
-                                    freeze_lm=freeze_lm,
-                                    qformer_pretrained=qformer_name,
-                                    num_query_token=num_query_tokens,
-                                    use_lora=use_lora,
-                                    freeze_qformer=freeze_qformer,
-                                    cast_dtype=cast_dtype)
-        else:
+        # if 't5' in lm_name.lower() or 't0' in lm_name.lower() or 'bart' in lm_name.lower():
+        #     self.embedding = Custom_BLIP2_Seq2Seq_LM(vit_pretrained=vision_name,
+        #                             lm_pretrained=lm_name,
+        #                             freeze_lm=freeze_lm,
+        #                             qformer_pretrained=qformer_name,
+        #                             num_query_token=num_query_tokens,
+        #                             use_lora=use_lora,
+        #                             freeze_qformer=freeze_qformer,
+        #                             cast_dtype=cast_dtype)
+        # else:
             self.embedding = Custom_BLIP2_Casual_LM(vit_pretrained=vision_name,
                                     lm_pretrained=lm_name,
                                     freeze_lm=freeze_lm,
