@@ -1,3 +1,5 @@
+# File: src/task/training.py
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,23 +18,26 @@ class Image_Captioning_Task:
     def __init__(self, config):
         self.num_epochs = config['train']['num_train_epochs']
         self.patience = config['train']['patience']
-        self.save_path = os.path.join(config['train']['output_dir'],config['model']['type_model'])
-        self.best_metric= config['train']['metric_for_best_model']
+        # Đường dẫn lưu log và các file khác (vẫn giữ trong /kaggle/working/)
+        self.save_path = os.path.join(config['train']['output_dir'], config['model']['type_model'])
+        # Đường dẫn lưu checkpoint trong /tmp/
+        self.tmp_save_path = '/tmp'
+        self.best_metric = config['train']['metric_for_best_model']
         self.learning_rate = config['train']['learning_rate']
-        self.weight_decay=config['train']['weight_decay']
+        self.weight_decay = config['train']['weight_decay']
         self.dataloader = Get_Loader(config)
-        if config['train']['precision']=='float32':
-            self.cast_dtype=torch.float32
-        elif config['train']['precision']=='bfloat16':
-            self.cast_dtype=torch.bfloat16
+        if config['train']['precision'] == 'float32':
+            self.cast_dtype = torch.float32
+        elif config['train']['precision'] == 'bfloat16':
+            self.cast_dtype = torch.bfloat16
         else:
-            self.cast_dtype=torch.float16
+            self.cast_dtype = torch.float16
 
-        self.cuda_device=config['train']['cuda_device']
+        self.cuda_device = config['train']['cuda_device']
         self.device = torch.device(f'{self.cuda_device}' if torch.cuda.is_available() else 'cpu')
-        self.base_model=build_model(config).to(self.device)
+        self.base_model = build_model(config).to(self.device)
         trainable_param = countTrainableParameters(self.base_model)
-        model_param=countParameters(self.base_model)
+        model_param = countParameters(self.base_model)
         print('num trainable params: ', trainable_param)
         print(f'% param: {(trainable_param/model_param)*100:.4f}')
         self.compute_score = ScoreCalculator()
@@ -42,13 +47,23 @@ class Image_Captioning_Task:
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lambda1)
 
     def training(self):
+        # Tạo thư mục lưu log trong /kaggle/working/
         if not os.path.exists(self.save_path):
-          os.makedirs(self.save_path)
-    
-        train,valid = self.dataloader.load_train_dev()
-        
-        if os.path.exists(os.path.join(self.save_path, 'last_model.pth')):
-            checkpoint = torch.load(os.path.join(self.save_path, 'last_model.pth'))
+            os.makedirs(self.save_path)
+
+        # Tạo thư mục /tmp/ nếu chưa tồn tại
+        if not os.path.exists(self.tmp_save_path):
+            os.makedirs(self.tmp_save_path)
+
+        train, valid = self.dataloader.load_train_dev()
+
+        # Đường dẫn checkpoint trong /tmp/
+        last_model_path = os.path.join(self.tmp_save_path, 'last_model.pth')
+        best_model_path = os.path.join(self.tmp_save_path, 'best_model.pth')
+
+        # Load last model nếu tồn tại
+        if os.path.exists(last_model_path):
+            checkpoint = torch.load(last_model_path)
             self.base_model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             print('loaded the last saved model!!!')
@@ -58,13 +73,14 @@ class Image_Captioning_Task:
             initial_epoch = 0
             print("first time training!!!")
 
-        if os.path.exists(os.path.join(self.save_path, 'best_model.pth')):
-            checkpoint = torch.load(os.path.join(self.save_path, 'best_model.pth'))
+        # Load best model nếu tồn tại
+        if os.path.exists(best_model_path):
+            checkpoint = torch.load(best_model_path)
             best_loss = checkpoint['loss']
         else:
             best_loss = 100.
-            
-        threshold=0
+
+        threshold = 0
         self.base_model.train()
         for epoch in range(initial_epoch, self.num_epochs + initial_epoch):
             train_loss = 0.
@@ -72,7 +88,7 @@ class Image_Captioning_Task:
             with tqdm(desc='Epoch %d - Training stage' % (epoch+1), unit='it', total=len(train)) as pbar:
                 for it, item in enumerate(train):
                     with torch.cuda.amp.autocast(dtype=self.cast_dtype):
-                        logits, loss = self.base_model(item['image'],item['caption'])
+                        logits, loss = self.base_model(item['image'], item['caption'])
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
@@ -81,53 +97,56 @@ class Image_Captioning_Task:
                     pbar.set_postfix(loss=train_loss / (it + 1))
                     pbar.update()
                 self.scheduler.step()
-                train_loss /=len(train)
-            
+                train_loss /= len(train)
+
             with torch.no_grad():
                 with tqdm(desc='Epoch %d - Valid stage' % (epoch+1), unit='it', total=len(valid)) as pbar:
                     for it, item in enumerate(valid):
                         with torch.cuda.amp.autocast(dtype=self.cast_dtype):
-                            logits, loss = self.base_model(item['image'],item['caption'])
-                            valid_loss+=loss.item()
+                            logits, loss = self.base_model(item['image'], item['caption'])
+                            valid_loss += loss.item()
                             pbar.set_postfix(loss=valid_loss / (it + 1))
                             pbar.update()
-                    valid_loss /=len(valid)
-            
+                    valid_loss /= len(valid)
+
             print(f"epoch {epoch + 1}/{self.num_epochs + initial_epoch}")
             print(f"train loss: {train_loss:.4f}")
             print(f"valid loss: {valid_loss:.4f}")
-            # Mở tệp tin log.txt trong chế độ ghi ('w' để ghi đè, 'a' để thêm vào cuối file)
-            with open(os.path.join(self.save_path,'log.txt'), 'a') as file:
+
+            # Ghi log vào file trong /kaggle/working/
+            with open(os.path.join(self.save_path, 'log.txt'), 'a') as file:
                 file.write(f"epoch {epoch + 1}/{self.num_epochs + initial_epoch}\n")
                 file.write(f"train loss: {train_loss:.4f}\n")
                 file.write(f"valid loss: {valid_loss:.4f}\n")
 
+            if self.best_metric == 'loss':
+                loss = valid_loss
 
-            if self.best_metric =='loss':
-                loss=valid_loss
-            # save the last model
+            # Lưu last model vào /tmp/
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': self.base_model.state_dict(),
                 'optimizer_state_dict': self.optimizer.state_dict(),
-                'loss': loss}, os.path.join(self.save_path, 'last_model.pth'))
-            
-            # save the best model
+                'loss': loss
+            }, last_model_path)
+            print(f"Saved last model to {last_model_path}")
+
+            # Lưu best model vào /tmp/
             if epoch > 0 and loss >= best_loss:
-              threshold += 1
+                threshold += 1
             else:
-              threshold = 0
+                threshold = 0
 
             if loss < best_loss:
                 best_loss = loss
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': self.base_model.state_dict(),
-                    # 'optimizer_state_dict': self.optimizer.state_dict(),
-                    'loss':loss}, os.path.join(self.save_path, 'best_model.pth'))
-                print(f"saved the best model with {self.best_metric} of {loss:.4f}")
-            
-            # early stopping
+                    'loss': loss
+                }, best_model_path)
+                print(f"Saved the best model to {best_model_path} with {self.best_metric} of {loss:.4f}")
+
+            # Early stopping
             if threshold >= self.patience:
                 print(f"early stopping after epoch {epoch + 1}")
                 break
