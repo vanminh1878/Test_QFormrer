@@ -13,6 +13,7 @@ from model.blip2_captioning import *
 from eval_metric.evaluate import ScoreCalculator
 from utils.utils import countTrainableParameters, countParameters
 from builder.model_builder import build_model
+import shutil  # Thêm import shutil để sao chép file
 
 class Image_Captioning_Task:
     def __init__(self, config):
@@ -22,6 +23,8 @@ class Image_Captioning_Task:
         self.save_path = os.path.join(config['train']['output_dir'], config['model']['type_model'])
         # Đường dẫn lưu checkpoint trong /tmp/
         self.tmp_save_path = '/tmp'
+        # Đường dẫn sao chép checkpoint về /kaggle/working/
+        self.output_save_path = '/kaggle/working'
         self.best_metric = config['train']['metric_for_best_model']
         self.learning_rate = config['train']['learning_rate']
         self.weight_decay = config['train']['weight_decay']
@@ -60,6 +63,10 @@ class Image_Captioning_Task:
         # Đường dẫn checkpoint trong /tmp/
         last_model_path = os.path.join(self.tmp_save_path, 'last_model.pth')
         best_model_path = os.path.join(self.tmp_save_path, 'best_model.pth')
+
+        # Đường dẫn sao chép checkpoint về /kaggle/working/
+        last_model_output_path = os.path.join(self.output_save_path, 'last_model.pth')
+        best_model_output_path = os.path.join(self.output_save_path, 'best_model.pth')
 
         # Load last model nếu tồn tại
         if os.path.exists(last_model_path):
@@ -131,6 +138,13 @@ class Image_Captioning_Task:
             }, last_model_path)
             print(f"Saved last model to {last_model_path}")
 
+            # Sao chép last model về /kaggle/working/
+            try:
+                shutil.copy(last_model_path, last_model_output_path)
+                print(f"Copied last model to {last_model_output_path}")
+            except Exception as e:
+                print(f"Error copying last model: {e}")
+
             # Lưu best model vào /tmp/
             if epoch > 0 and loss >= best_loss:
                 threshold += 1
@@ -145,6 +159,13 @@ class Image_Captioning_Task:
                     'loss': loss
                 }, best_model_path)
                 print(f"Saved the best model to {best_model_path} with {self.best_metric} of {loss:.4f}")
+
+                # Sao chép best model về /kaggle/working/
+                try:
+                    shutil.copy(best_model_path, best_model_output_path)
+                    print(f"Copied best model to {best_model_output_path}")
+                except Exception as e:
+                    print(f"Error copying best model: {e}")
 
             # Early stopping
             if threshold >= self.patience:
